@@ -25,7 +25,6 @@ COPY . /app/
 EXPOSE 8000
 
 ENV PYTHONPATH="${PYTHONPATH}:/app"
-ENV OPENAI_API_KEY='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'
 
 # Command to run the application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
