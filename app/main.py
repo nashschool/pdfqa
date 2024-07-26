@@ -11,6 +11,8 @@ from langchain_chroma import Chroma
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from fastapi.responses import JSONResponse
+
+from fastapi.middleware.cors import CORSMiddleware
 from langchain_groq import ChatGroq
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.chat_message_histories import ChatMessageHistory
@@ -25,6 +27,18 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 app = FastAPI()
 
+origins = [
+    "http://localhost:3000",
+    "https://nashschool.com",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def setup_retriever(doc_splits):
     embedding = OpenAIEmbeddings(model="text-embedding-3-large")
