@@ -2,6 +2,7 @@ uvicorn
 fastapi
 pypdf
 numpy
+python-multipart
 langchain-openai
 langchain_groq 
 langchain_chroma
