@@ -4,19 +4,18 @@ FROM python:3.9-slim
 # Set the working directory in the container
 WORKDIR /app
 
-# Update system and install gcc and other necessary dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libpq-dev \
-    build-essential \
-    --no-install-recommends && rm -rf /var/lib/apt/lists/*
+COPY requirements.txt /app/
+
+RUN pip install pip \
+ && pip install -r requirements.txt \
+ && rm -rf /root/.cache
 
 # Upgrade pip
-RUN pip install --upgrade pip
+RUN pip install --no-cache-dir --upgrade pip
 
 # Install Python dependencies
 COPY requirements.txt /app/
-RUN pip install -r requirements.txt
+
 
 # Copy the rest of the application
 COPY . /app/

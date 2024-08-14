@@ -14,6 +14,9 @@ nosetests.xml
 coverage.xml
 *,cover
 *.log
+node_modules
+Dockerfile*
+*.md
 .git*
 tests
 scripts
