@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 import tempfile
 import uvicorn
 import logging
+from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.prompts import ChatPromptTemplate
@@ -11,7 +12,8 @@ from langchain_chroma import Chroma
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from fastapi.exceptions import RequestValidationError
-
+from .retriever import Retriever
+from langchain_core.output_parsers import StrOutputParser
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_groq import ChatGroq
 from langchain_openai import OpenAIEmbeddings
@@ -55,17 +57,37 @@ async def ask_question(file: UploadFile = File(...), question: str = Form(...)):
     try:
         file_content = await file.read()
         doc_splits = process_document(file_content)
-        groq_api_key = os.getenv('GROQ_KEY', 'default_value_if_not_set')
+        rag_chain = rag_setup()
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+        retriever = Retriever(doc_splits, embeddings)
 
-        llm = ChatGroq(temperature=0, model_name="llama-3.1-70b-versatile", groq_api_key=groq_api_key)
-        retriever = setup_retriever(doc_splits)
-        answer_gen = gen(llm, retriever, question)
-
-        return JSONResponse(content={"answer": answer_gen})
+        context = retriever.query(question)
+        print(f"context: {context}, question: {question}")
+        generation = rag_chain.invoke({"context": context, "question": question})
+        # answer_gen = gen(llm, retriever, question)
+        # return JSONResponse(content={"answer": answer_gen})
+        return JSONResponse(content={"answer": generation})
+        
 
     except Exception as e:
         logging.error(f"An error occurred: {e}", exc_info=True)
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+def rag_setup():
+    prompt = PromptTemplate(
+        template="""You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the mathematical question. You can only make conversations based on the provided information and should refrain from making assumptions. If information isn’t available in context to answer, politely say you don’t have knowledge about that. If it is a related mathematical question, explain the answer in detail, using steps where necessary. <|eot_id|><|start_header_id|>user<|end_header_id|>
+        Question: {question}, Context: {context}, Answer: <|eot_id|><|start_header_id|>assistant<|end_header_id|>""",
+        input_variables=["question", "context"]
+    )
+    groq_api_key = os.getenv('GROQ_KEY', 'default_value_if_not_set')
+
+    llm = ChatGroq(temperature=0, model_name="llama3-70b-8192", groq_api_key=groq_api_key)
+    rag_chain = prompt | llm | StrOutputParser()
+    return rag_chain
+
+# Post-processing
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
 
 def setup_retriever(doc_splits):
     embedding = OpenAIEmbeddings(model="text-embedding-3-large")
@@ -75,6 +97,20 @@ def setup_retriever(doc_splits):
 
 def gen(llm, retriever, input_question):
     
+    print(f'ques is: {input_question}')
+    retriever = Retriever(doc_splits, embeddings)
+
+    generation = conversational_rag_chain.invoke(
+        {"input": input_question},
+        config={
+            "configurable": {"session_id": "abc123"}
+        },  
+    )["answer"]
+    return generation
+
+def gen_with_history(llm, retriever, input_question):
+    
+    print(f'ques is: {input_question}')
     contextualize_q_system_prompt = (
         "Given a chat history and the latest user question "
         "which might reference context in the chat history, "
@@ -94,14 +130,12 @@ def gen(llm, retriever, input_question):
     )
 
     system_prompt = (
-        "You are an assistant for question-answering tasks. "
-        "Use the following pieces of retrieved context to answer "
-        "the question. If you don't know the answer, say that you "
-        "don't know. Use three sentences maximum and keep the "
-        "answer concise."
-        "\n\n"
-        "{context}"
+        "Help on a clarifying question, which is based on the"
+        "question and the answer that precedes it. "
+        "If you think the question is irrelevant, say that you "
+        "don't know. If it is mathematical, answer in steps."
     )
+    
     qa_prompt = ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
