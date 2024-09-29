@@ -3,7 +3,6 @@ from fastapi.responses import JSONResponse
 import tempfile
 import uvicorn
 import logging
-from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.prompts import ChatPromptTemplate
@@ -13,9 +12,8 @@ from langchain.chains import create_history_aware_retriever, create_retrieval_ch
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from fastapi.exceptions import RequestValidationError
 from .retriever import Retriever
-from langchain_core.output_parsers import StrOutputParser
+from .prompt import RAGSetup
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_groq import ChatGroq
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
@@ -52,38 +50,104 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": exc.errors()},
     )
 
-@app.post("/ask-question")
-async def ask_question(file: UploadFile = File(...), question: str = Form(...)):
+
+@app.post("/formula-extractor")
+async def formula_extractor(file: UploadFile = File(...)):
     try:
         file_content = await file.read()
-        doc_splits = process_document(file_content)
-        rag_chain = rag_setup()
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-        retriever = Retriever(doc_splits, embeddings)
+        question, correct_answer = extract_question_and_answer_from_pdf(file_content)
+        formula_extractor_template = """
+        You are a formula extractor. Given a question and a correct answer,
+        explain the mathematical formulas used in solving the question. The formulas must be generic and the notation must be explained.
+        Example Answer: Formula 1. Distance formula: \(D = sqrt((x2-x1)^2+(y2-y1)^2)\) between points \((x1,y1)\) and \((x2,y2)\). Formula 2.
+        No need to allude to the specific problem and its numbers. 
+        Ensure to enclose mathematical symbols and equations inside \(...\).
+        Just list the formulas one by one; no intro or conclusion or additional
+        explanation is necessary.
+        Question:
+        {question}
+        Correct Answer:
+        {correct_answer}"""
 
-        context = retriever.query(question)
-        print(f"context: {context}, question: {question}")
-        generation = rag_chain.invoke({"context": context, "question": question})
-        # answer_gen = gen(llm, retriever, question)
-        # return JSONResponse(content={"answer": answer_gen})
-        return JSONResponse(content={"answer": generation})
-        
+        formula_extractor = RAGSetup(formula_extractor_template, ["question", "correct_answer"])
+        rag_chain = formula_extractor.create_rag_chain()
+        feedback = rag_chain.invoke({
+            "question": question,
+            "correct_answer": correct_answer,
+        })
+        return JSONResponse(content={"answer": feedback})
+    
+    except Exception as e:
+        logging.error(f"An error occurred: {e}", exc_info=True)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+    
+@app.post("/check-answer")
+async def check_ans(file: UploadFile = File(...), user_answer: str = Form(...)):
+    try:
+        file_content = await file.read()
+        question, correct_answer = extract_question_and_answer_from_pdf(file_content)
+        prompt ="""You are an examiner who provides detailed feedback and fair marking.
+
+        Question:
+        {question}
+
+        Correct Answer:
+        {correct_answer}
+
+        User's Answer:
+        {user_answer}
+
+        Please compare the user's answer with the correct answer. Your answer must have:
+        - Marks out of 10
+        - 3-line feedback addressed to the user
+        For irrelevant answer, you must only say Irrelevant in the feeback. Ensure to enclose mathematical symbols 
+        and equations inside \(...\)."""
+       
+        answer_checker = RAGSetup(prompt, ["question", "correct_answer",  "user_answer"])
+        rag_chain = answer_checker.create_rag_chain()
+        feedback = rag_chain.invoke({
+            "question": question,
+            "correct_answer": correct_answer,
+            "user_answer": user_answer
+        })
+        return JSONResponse(content={"answer": feedback})
 
     except Exception as e:
         logging.error(f"An error occurred: {e}", exc_info=True)
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-def rag_setup():
-    prompt = PromptTemplate(
-        template="""You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the mathematical question. You can only make conversations based on the provided information and should refrain from making assumptions. If information isn’t available in context to answer, politely say you don’t have knowledge about that. If it is a related mathematical question, explain the answer in detail, using steps where necessary. <|eot_id|><|start_header_id|>user<|end_header_id|>
-        Question: {question}, Context: {context}, Answer: <|eot_id|><|start_header_id|>assistant<|end_header_id|>""",
-        input_variables=["question", "context"]
-    )
-    groq_api_key = os.getenv('GROQ_KEY', 'default_value_if_not_set')
+@app.post("/ask-question")
+async def ask_question(file: UploadFile = File(...), user_question: str = Form(...)):
+    try:
+        file_content = await file.read()
+        question, correct_answer = extract_question_and_answer_from_pdf(file_content)
+        prompt="""You are an assistant for question-answering tasks. 
+        You are given a question and an answer. You have to answer follow-up question on the 
+        question and answer. 
+        Question:
+        {question}
+        Correct Answer:
+        {correct_answer}
+        User Question: {user_question} 
+        You can only make conversations based on the provided information and should 
+        refrain from making assumptions. If information isn’t available in 
+        context to answer, politely say you don’t have knowledge about that. 
+        If it is a related mathematical question, explain the answer in detail, 
+        using steps where necessary. Ensure to enclose mathematical symbols and equations inside \(...\)."""
+        
+        ask_ques = RAGSetup(prompt, ["question", "correct_answer", "user_question"])
+        rag_chain = ask_ques.create_rag_chain()
+        ai_clarification = rag_chain.invoke({
+            "question": question,
+            "correct_answer": correct_answer,
+            "user_question": user_question
+        })
 
-    llm = ChatGroq(temperature=0, model_name="llama3-70b-8192", groq_api_key=groq_api_key)
-    rag_chain = prompt | llm | StrOutputParser()
-    return rag_chain
+        return JSONResponse(content={"answer": ai_clarification})
+
+    except Exception as e:
+        logging.error(f"An error occurred: {e}", exc_info=True)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 # Post-processing
 def format_docs(docs):
@@ -168,6 +232,27 @@ def gen_with_history(llm, retriever, input_question):
         },  
     )["answer"]
     return generation
+
+def extract_question_and_answer_from_pdf(file_content):
+    """
+    Extracts the question and correct answer from a PDF file.
+    Assumes the PDF contains 'Question:' and 'Answer:' as markers.
+    """
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        tmp_file.write(file_content)
+        tmp_file.flush()
+        docs = [PyPDFLoader(tmp_file.name).load()]
+        text = "\n".join([doc.page_content for d in docs for doc in d])
+        # Extract the question and answer
+        question_start = text.find('Question:')   
+        answer_start = text.find('Solution:')
+        if question_start != -1 and answer_start != -1:
+            question = text[question_start + len('Question:'):answer_start].strip()
+            correct_answer = text[answer_start + len('Solution:'):].strip()
+        else:
+            raise ValueError("Could not find 'Question:' or 'Solution:' markers in the PDF.") 
+        return question, correct_answer
+        
 
 def process_document(file_content):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
