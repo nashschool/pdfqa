@@ -117,29 +117,39 @@ async def check_ans(file: UploadFile = File(...), user_answer: str = Form(...)):
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.post("/ask-question")
-async def ask_question(file: UploadFile = File(...), user_question: str = Form(...)):
+async def ask_question(file: UploadFile = File(...), user_question: str = Form(...), conversation_history: str = Form("")):
     try:
         file_content = await file.read()
         question, correct_answer = extract_question_and_answer_from_pdf(file_content)
-        prompt="""You are an assistant for question-answering tasks. 
-        You are given a question and an answer. You have to answer follow-up question on the 
-        question and answer. 
-        Question:
+        prompt = """You are an assistant for question-answering tasks. 
+        You are given a question, its correct answer, and a conversation history. 
+        You have to answer the user's follow-up question based on this context.
+
+        Original Question:
         {question}
+
         Correct Answer:
         {correct_answer}
-        User Question: {user_question} 
-        You can only make conversations based on the provided information and should 
-        refrain from making assumptions. If information isn’t available in 
-        context to answer, politely say you don’t have knowledge about that. 
-        If it is a related mathematical question, explain the answer in detail, 
-        using steps where necessary. Ensure to enclose mathematical symbols and equations inside \(...\)."""
+
+        Conversation History:
+        {conversation_history}
+
+        User Question: {user_question}
+
+        Respond to the user's question, taking into account the original question, 
+        its correct answer, and the conversation history. You can only use the 
+        provided information and should refrain from making assumptions. If 
+        information isn't available in the context to answer, politely say you 
+        don't have knowledge about that. If it is a related mathematical question, 
+        explain the answer in detail, using steps where necessary. Ensure to 
+        enclose mathematical symbols and equations inside \(...\)."""
         
-        ask_ques = RAGSetup(prompt, ["question", "correct_answer", "user_question"])
+        ask_ques = RAGSetup(prompt, ["question", "correct_answer", "conversation_history", "user_question"])
         rag_chain = ask_ques.create_rag_chain()
         ai_clarification = rag_chain.invoke({
             "question": question,
             "correct_answer": correct_answer,
+            "conversation_history": conversation_history,
             "user_question": user_question
         })
 
