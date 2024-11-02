@@ -7,8 +7,8 @@ WORKDIR /app
 COPY requirements.txt /app/
 
 RUN pip install pip \
- && pip install -r requirements.txt \
- && rm -rf /root/.cache
+    && pip install -r requirements.txt \
+    && rm -rf /root/.cache
 
 # Upgrade pip
 RUN pip install --no-cache-dir --upgrade pip
@@ -23,7 +23,7 @@ COPY . /app/
 # Expose the port the app runs on
 EXPOSE 8000
 
-ENV PYTHONPATH="${PYTHONPATH}:/app"
+ENV PYTHONPATH=/app
 
 # Command to run the application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
