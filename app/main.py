@@ -191,20 +191,27 @@ async def check_ans(file: UploadFile = File(...), user_answer: str = Form(...)):
 
 
 @app.post("/ask-question")
-async def ask_question(file: UploadFile = File(...), user_question: str = Form(...)):
+async def ask_question(file: UploadFile = File(...), user_question: str = Form(...), conversation_history: str = Form("")):
     try:
         file_content = await file.read()
         question, correct_answer = extract_question_and_answer_from_pdf(file_content)
         prompt = """You are an assistant for question-answering tasks. 
-        You are given a question and an answer. You have to answer follow-up question on the 
-        question and answer. 
-        Question:
+        You are given a question, its correct answer, and a conversation history. 
+        You have to answer the user's follow-up question based on this context.
+
+        Original Question:
         {question}
+
         Correct Answer:
         {correct_answer}
-        User Question: {user_question} 
-        You should try to answer the user's question based on the 
-        provided question and the correct answer. You can use your knowledge to answer relevant questions which
+
+        Conversation History:
+        {conversation_history}
+
+        User Question: {user_question}
+
+        Respond to the user's question, taking into account the original question, 
+        its correct answer, and the conversation history. You can use your knowledge to answer relevant questions which
         are not fully clarifiable using the given information.
         Language: The user can also enter the chat in other languages like Hindi or Hinglish or Tamil, etc, 
         in which case you have to respond in the same language as the user. 
@@ -212,16 +219,15 @@ async def ask_question(file: UploadFile = File(...), user_question: str = Form(.
         If it is a related mathematical question, explain the answer in detail, 
         using steps where necessary. Ensure to enclose mathematical symbols and equations inside \(...\)
         Politely refuse irrelevant questions or comments, urging them to get back to study."""
-
-        ask_ques = RAGSetup(prompt, ["question", "correct_answer", "user_question"])
+        
+        ask_ques = RAGSetup(prompt, ["question", "correct_answer", "conversation_history", "user_question"])
         rag_chain = ask_ques.create_rag_chain()
-        ai_clarification = rag_chain.invoke(
-            {
-                "question": question,
-                "correct_answer": correct_answer,
-                "user_question": user_question,
-            }
-        )
+        ai_clarification = rag_chain.invoke({
+            "question": question,
+            "correct_answer": correct_answer,
+            "conversation_history": conversation_history,
+            "user_question": user_question
+        })
 
         return JSONResponse(content={"answer": ai_clarification})
 
