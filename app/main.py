@@ -115,22 +115,25 @@ async def formula_extractor(file: UploadFile = File(...)):
         file_content = await file.read()
         question, correct_answer = extract_question_and_answer_from_pdf(file_content)
         formula_extractor_template = """
-        You are a formula extractor. Given a question and a correct answer,
-        explain the mathematical formulas used in solving the question. The formulas must be not too elementary (like Pythagoras 
-        theorem or \(sin^2(\theta)+cos^2(\theta)=1\).). Instead they must be informative to a sixth form student and the notation must be explained.
-        Don't allude to the specific problem and its numbers. 
-        Ensure to enclose mathematical symbols and equations inside \(...\).
-        Just list the formulas one by one; don't give any introductory line or conclusion or additional
-        explanation.
-        Follow the Example Answer template: 
-        
-        Formula 1. Distance formula: \(D = sqrt((x2-x1)^2+(y2-y1)^2)\) between points \((x1,y1)\) and \((x2,y2)\). 
-        Formula 2. Sine addition \(\sin(A+B)=\sin A \cos B + \cos A \sin B \) 
-        
-        Question:
-        {question}
-        Correct Answer:
-        {correct_answer}"""
+You are a specialized formula extractor. Given a question and its correct answer, identify and list the mathematical formulas necessary to solve this question. 
+
+**Requirements**:
+1. **Formula Selection**: Do not include elementary formulas like the Pythagorean theorem or \(\sin^2(\theta) + \cos^2(\theta) = 1\).
+2. **Notation Explanation**: For each formula, provide clear notation definitions.
+3. **Math Formatting**: You must enclose all mathematical symbols and equations within \(...\).
+4. **Response Structure**: List each formula directly, one by one, without any introductory phrases, conclusions, or extraneous explanations. Do not reference specific numbers or details from the question.
+
+**Formatting Example**:
+- Formula 1. Distance formula: \(D = sqrt((x2-x1)^2+(y2-y1)^2)\), where \(D\) is the distance between points \((x_1, y_1)\) and \((x_2, y_2)\).
+- Formula 2. Sine addition formula: \(\sin(A + B) = \sin A \cos B + \cos A \sin B\).
+
+**Task**:
+Question:
+{question}
+
+Correct Answer:
+{correct_answer}
+"""
 
         formula_extractor = RAGSetup(
             formula_extractor_template, ["question", "correct_answer"]
@@ -154,25 +157,32 @@ async def check_ans(file: UploadFile = File(...), user_answer: str = Form(...)):
     try:
         file_content = await file.read()
         question, correct_answer = extract_question_and_answer_from_pdf(file_content)
-        prompt = """You are an examiner who provides detailed feedback and fair marking.
+        prompt = """
+You are an examiner responsible for providing detailed feedback and fair marking of the user's answer.
 
-        Question:
-        {question}
+### Task:
+Evaluate the user's answer by comparing it to the correct answer provided. 
 
-        Correct Answer:
-        {correct_answer}
+**Guidelines**:
+1. **Scoring**: Assign a score out of 10 based on the accuracy and completeness of the user's answer.
+2. **Feedback**:
+   - Write exactly 3 lines of constructive, encouraging feedback addressed directly to the user.
+   - If the answer is irrelevant, clearly state "Irrelevant" and politely encourage the user to refocus on their studies.
+3. **Language Matching**: Respond in the same language as the user's answer (e.g., Hindi, Hinglish, Tamil).
+4. **Mathematical Formatting**: You must enclose all mathematical symbols and equations inside \(...\) to ensure clear presentation.
 
-        User's Answer:
-        {user_answer}
-        
-        Language: The user can also enter the answer in other languages like Hindi or Hinglish or Tamil, etc, 
-        in which case you have to respond in the same language as the user. 
+### Response Format:
+1. **Marks**: /10
+2. **Feedback**: 
+   - Line 1:
+   - Line 2:
+   - Line 3:
 
-        Please evaluate the user's answer by comparing with the correct answer. Your answer must have:
-        - Marks out of 10
-        - 3-line encouraging feedback that must be addressed to the user, 
-        For irrelevant answer, say it is Irrelevant and nudge them to get back to study. Ensure to enclose mathematical symbols 
-        and equations inside \(...\)."""
+### Evaluation Context:
+- **Question**: {question}
+- **Correct Answer**: {correct_answer}
+- **User's Answer**: {user_answer}
+"""
 
         answer_checker = RAGSetup(prompt, ["question", "correct_answer", "user_answer"])
         rag_chain = answer_checker.create_rag_chain()
@@ -191,43 +201,53 @@ async def check_ans(file: UploadFile = File(...), user_answer: str = Form(...)):
 
 
 @app.post("/ask-question")
-async def ask_question(file: UploadFile = File(...), user_question: str = Form(...), conversation_history: str = Form("")):
+async def ask_question(
+    file: UploadFile = File(...),
+    user_question: str = Form(...),
+    conversation_history: str = Form(""),
+):
     try:
         file_content = await file.read()
         question, correct_answer = extract_question_and_answer_from_pdf(file_content)
-        prompt = """You are an assistant for question-answering tasks. 
-        You are given a question, its correct answer, and a conversation history. 
-        You have to answer the user's follow-up question based on this context.
+        prompt = """
+You are a highly specialized assistant dedicated to answering only relevant questions in a question-answering task. Your responses must strictly adhere to the instructions below.
 
-        Original Question:
-        {question}
+Context Provided:
+- **Original Question:** {question}
+- **Correct Answer:** {correct_answer}
+- **Conversation History:** {conversation_history}
+- **User's Follow-up Question:** {user_question}
 
-        Correct Answer:
-        {correct_answer}
+### Instructions:
+1. **Response Scope**: Answer only the user's follow-up question, using information from the original question, the correct answer, and the conversation history. Do not introduce any information beyond what is provided or known.
+   
+2. **Language Matching**: Respond in the same language used by the user, such as Hindi, Hinglish, Tamil, etc. If unsure, default to the language used in the user's question.
 
-        Conversation History:
-        {conversation_history}
+3. **Mathematical Clarity**: For math-related questions, provide a detailed explanation. Present each step clearly and enclose all mathematical symbols and equations in LaTeX format, using \(...\) for inline expressions. Do not use $...$ or $$...$$
 
-        User Question: {user_question}
+4. **Assumptions**: Do not make assumptions. Answer only based on the provided context or general knowledge applicable to the question. If the context lacks information for a complete answer, state only what is verifiable without guessing.
 
-        Respond to the user's question, taking into account the original question, 
-        its correct answer, and the conversation history. You can use your knowledge to answer relevant questions which
-        are not fully clarifiable using the given information.
-        Language: The user can also enter the chat in other languages like Hindi or Hinglish or Tamil, etc, 
-        in which case you have to respond in the same language as the user. 
-        Refrain from making assumptions. 
-        If it is a related mathematical question, explain the answer in detail, 
-        using steps where necessary. Ensure to enclose mathematical symbols and equations inside \(...\)
-        Politely refuse irrelevant questions or comments, urging them to get back to study."""
-        
-        ask_ques = RAGSetup(prompt, ["question", "correct_answer", "conversation_history", "user_question"])
+5. **Relevance Check**: If the user's question or comment is irrelevant, politely decline to answer. Encourage the user to focus on relevant study topics.
+
+6. **Politeness and Encouragement**: Always be polite and encouraging. Politely guide the user to ask relevant questions if they deviate.
+
+### Important:
+Failure to follow these instructions strictly will result in unsatisfactory assistance to the user. Ensure each response aligns exactly with these guidelines.
+"""
+
+        ask_ques = RAGSetup(
+            prompt,
+            ["question", "correct_answer", "conversation_history", "user_question"],
+        )
         rag_chain = ask_ques.create_rag_chain()
-        ai_clarification = rag_chain.invoke({
-            "question": question,
-            "correct_answer": correct_answer,
-            "conversation_history": conversation_history,
-            "user_question": user_question
-        })
+        ai_clarification = rag_chain.invoke(
+            {
+                "question": question,
+                "correct_answer": correct_answer,
+                "conversation_history": conversation_history,
+                "user_question": user_question,
+            }
+        )
 
         return JSONResponse(content={"answer": ai_clarification})
 
