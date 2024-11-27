@@ -35,6 +35,7 @@ origins = [
     "http://localhost:8000",
     "http://localhost:3000",
     "https://capeup.vercel.app",
+    "https://www.cape-up.com",
 ]
 
 app.add_middleware(
@@ -80,8 +81,8 @@ async def step_evaluator(file: UploadFile = File(...)):
         detailing the solution till the point of the current step, encourage them to get to the next step and the correct answer. 
         Enclose all math inside \( ... \)
 
-        Language: The user can also enter the chat in other languages like Hindi or Hinglish or Tamil, etc, 
-        in which case you must respond in the same language as the user. 
+        Language: Your responses must be in English, but if you are sure the user has responded in languages like 
+        Hindi or Hinglish or Tamil, etc, you must respond in the same language as the user. 
         
         Keep your guidance concise.
         If the user has the correct answer, your feedback must have:
@@ -115,7 +116,13 @@ async def formula_extractor(file: UploadFile = File(...)):
         file_content = await file.read()
         question, correct_answer = extract_question_and_answer_from_pdf(file_content)
         formula_extractor_template = """
-You are a specialized formula extractor. Given a question and its correct answer, identify and list the mathematical formulas necessary to solve this question. 
+You are a specialized formula extract
+
+
+
+
+
+or. Given a question and its correct answer, identify and list the mathematical formulas necessary to solve this question. 
 
 **Requirements**:
 1. **Formula Selection**: Do not include elementary formulas like the Pythagorean theorem or \(\sin^2(\theta) + \cos^2(\theta) = 1\).
@@ -168,7 +175,8 @@ Evaluate the user's answer by comparing it to the correct answer provided.
 2. **Feedback**:
    - Write exactly 3 lines of constructive, encouraging feedback addressed directly to the user.
    - If the answer is irrelevant, clearly state "Irrelevant" and politely encourage the user to refocus on their studies.
-3. **Language Matching**: Respond in the same language as the user's answer (e.g., Hindi, Hinglish, Tamil).
+3. Language: Your responses must be in English, but if you are sure the user has responded in languages like 
+        Hindi or Hinglish or Tamil, etc, you must respond in the same language as the user.        
 4. **Mathematical Formatting**: You must enclose all mathematical symbols and equations inside \(...\) to ensure clear presentation.
 
 ### Response Format:
@@ -221,8 +229,9 @@ Context Provided:
 ### Instructions:
 1. **Response Scope**: Answer only the user's follow-up question, using information from the original question, the correct answer, and the conversation history. Do not introduce any information beyond what is provided or known.
    
-2. **Language Matching**: Respond in the same language used by the user, such as Hindi, Hinglish, Tamil, etc. If unsure, default to the language used in the user's question.
-
+2. Language: Your responses must be in English, but if you are sure the user has responded in languages like 
+        Hindi or Hinglish or Tamil, etc, you must respond in the same language as the user. 
+        
 3. **Mathematical Clarity**: For math-related questions, provide a detailed explanation. Present each step clearly and enclose all mathematical symbols and equations in LaTeX format, using \(...\) for inline expressions. Do not use $...$ or $$...$$
 
 4. **Assumptions**: Do not make assumptions. Answer only based on the provided context or general knowledge applicable to the question. If the context lacks information for a complete answer, state only what is verifiable without guessing.
