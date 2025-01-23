@@ -2,12 +2,12 @@ uvicorn
 fastapi
 numpy
 pypdf
+pymupdf 
+reportlab
 python-multipart
 langchain-openai
 langchain_groq 
 langchain_chroma
 langchain-community
-langchain_huggingface
-langchain_openai
 langchain_groq
 scikit-learn

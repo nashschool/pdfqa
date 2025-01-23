@@ -2,7 +2,12 @@ from fastapi import FastAPI, File, UploadFile, Form, Request, HTTPException
 from fastapi.responses import JSONResponse
 import tempfile
 import uvicorn
+from io import BytesIO
 import logging
+import fitz
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.prompts import ChatPromptTemplate
@@ -168,7 +173,7 @@ async def check_ans(file: UploadFile = File(...), user_answer: str = Form(...)):
 You are an examiner responsible for providing detailed feedback and fair marking of the user's answer.
 
 ### Task:
-Evaluate the user's answer by comparing it to the correct answer provided. 
+Evaluate the user's answer bxy comparing it to the correct answer provided. 
 
 **Guidelines**:
 1. **Scoring**: Assign a score out of 10 based on the accuracy and completeness of the user's answer.
@@ -202,6 +207,72 @@ Evaluate the user's answer by comparing it to the correct answer provided.
             }
         )
         return JSONResponse(content={"answer": feedback})
+
+    except Exception as e:
+        logging.error(f"An error occurred: {e}", exc_info=True)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.post("/ask-book-question")
+async def ask_question(
+    file: UploadFile = File(...),
+    user_question: str = Form(...),
+    conversation_history: str = Form(""),
+):
+    try:
+        # Step 1: Extract text from the uploaded PDF
+        extracted_text = extract_text_from_pdf(file)
+        print("length Extracted Text:", len(extracted_text))
+
+        # Step 2: Create a new PDF with the extracted text
+        new_pdf_buffer = write_text_to_pdf(extracted_text)
+        new_pdf_content = new_pdf_buffer.read()
+
+        # Debug: Check content of the newly created PDF
+        print("New PDF content created successfully.")
+
+        # Step 3: Prepare the RAG prompt with extracted text
+
+        prompt = """
+You are a highly specialized assistant dedicated to answering only relevant questions from a book extract. Your responses must strictly adhere to the instructions below.
+
+Context Provided:
+- **Book Content:** {extracted_text}
+- **Conversation History:** {conversation_history}
+- **User's Follow-up Question:** {user_question}
+
+### Instructions:
+1. **Response Scope**: Answer only the user's follow-up question, using information from the original question, the correct answer, and the conversation history. Do not introduce any information beyond what is provided or known.
+   
+2. Language: Your responses must be in English, but if you are sure the user has responded in languages like 
+        Hindi or Hinglish or Tamil, etc, you must respond in the same language as the user. 
+        
+3. **Mathematical Clarity**: For math-related questions, provide a detailed explanation. Present each step clearly and enclose all mathematical symbols and equations in LaTeX format, using \(...\) for inline expressions. Do not use $...$ or $$...$$
+
+4. **Assumptions**: Do not make assumptions. Answer only based on the provided context or general knowledge applicable to the question. If the context lacks information for a complete answer, state only what is verifiable without guessing.
+
+5. **Relevance Check**: If the user's question or comment is irrelevant, politely decline to answer. Encourage the user to focus on relevant study topics.
+
+6. **Politeness and Encouragement**: Always be polite and encouraging. Politely guide the user to ask relevant questions if they deviate.
+
+### Important:
+Failure to follow these instructions strictly will result in unsatisfactory assistance to the user. Ensure each response aligns exactly with these guidelines.
+"""
+
+        ask_ques = RAGSetup(
+            prompt,
+            ["extracted_text", "conversation_history", "user_question"],
+        )
+        rag_chain = ask_ques.create_rag_chain()
+        ai_clarification = rag_chain.invoke(
+            {
+                "extracted_text": extracted_text,
+                "conversation_history": conversation_history,
+                "user_question": user_question,
+            }
+        )
+
+        return JSONResponse(content={"answer": ai_clarification})
 
     except Exception as e:
         logging.error(f"An error occurred: {e}", exc_info=True)
@@ -369,6 +440,47 @@ def extract_question_and_answer_from_pdf(file_content):
                 "Could not find 'Question:' or 'Solution:' markers in the PDF."
             )
         return question, correct_answer
+
+
+def extract_text_from_pdf(uploaded_file: UploadFile):
+    doc = fitz.open(
+        stream=uploaded_file.file.read(), filetype="pdf"
+    )  # Load PDF from stream
+    extracted_text = []
+
+    for page_num in range(doc.page_count):
+        page = doc.load_page(page_num)
+        text = page.get_text()
+        extracted_text.append(f"Page {page_num + 1}:\n{text}\n")
+
+    doc.close()
+    return extracted_text
+
+
+# Write extracted text to a new PDF and return the file-like object
+def write_text_to_pdf(extracted_text):
+    buffer = BytesIO()  # Use BytesIO to store PDF in memory
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+    margin = 50  # Set margin for readability
+
+    for page_text in extracted_text:
+        c.setFont("Helvetica", 12)
+        y_position = height - margin  # Start near the top of the page
+
+        for line in page_text.splitlines():
+            if y_position < margin:  # Add new page when out of space
+                c.showPage()
+                y_position = height - margin
+
+            c.drawString(margin, y_position, line)
+            y_position -= 14  # Move down for the next line
+
+        c.showPage()  # Start a new page for the next text block
+
+    c.save()
+    buffer.seek(0)  # Reset the buffer's position for reading
+    return buffer
 
 
 def extract_question_and_answer_conv_from_pdf(file_content):
