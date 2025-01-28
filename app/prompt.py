@@ -19,7 +19,7 @@ class RAGSetup:
         )
         llm = ChatGroq(
             temperature=0.5,
-            model_name="llama-3.1-70b-versatile",
+            model_name="llama-3.3-70b-versatile",
             groq_api_key=self.groq_api_key,
         )
         rag_chain = prompt | llm | StrOutputParser()
