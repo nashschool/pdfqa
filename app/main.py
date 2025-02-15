@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Form, Request, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, Request
 from fastapi.responses import JSONResponse
 import tempfile
 import uvicorn
@@ -7,22 +7,10 @@ import logging
 import fitz
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
-
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain.prompts import ChatPromptTemplate
-from langchain_core.prompts import MessagesPlaceholder
-from langchain_chroma import Chroma
-from langchain.chains import create_history_aware_retriever, create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from fastapi.exceptions import RequestValidationError
-from .retriever import Retriever
 from .prompt import RAGSetup
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_openai import OpenAIEmbeddings
-from langchain_community.chat_message_histories import ChatMessageHistory
-from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.runnables.history import RunnableWithMessageHistory
 
 # Configure logging
 logging.basicConfig(
@@ -121,13 +109,7 @@ async def formula_extractor(file: UploadFile = File(...)):
         file_content = await file.read()
         question, correct_answer = extract_question_and_answer_from_pdf(file_content)
         formula_extractor_template = """
-You are a specialized formula extract
-
-
-
-
-
-or. Given a question and its correct answer, identify and list the mathematical formulas necessary to solve this question. 
+You are a specialized formula extractor. Given a question and its correct answer, identify and list the mathematical formulas necessary to solve this question. 
 
 **Requirements**:
 1. **Formula Selection**: Do not include elementary formulas like the Pythagorean theorem or \(\sin^2(\theta) + \cos^2(\theta) = 1\).
@@ -222,16 +204,8 @@ async def ask_question(
     try:
         # Step 1: Extract text from the uploaded PDF
         extracted_text = extract_text_from_pdf(file)
-        print("length Extracted Text:", len(extracted_text))
 
-        # Step 2: Create a new PDF with the extracted text
-        new_pdf_buffer = write_text_to_pdf(extracted_text)
-        new_pdf_content = new_pdf_buffer.read()
-
-        # Debug: Check content of the newly created PDF
-        print("New PDF content created successfully.")
-
-        # Step 3: Prepare the RAG prompt with extracted text
+        # Step 2: Prepare the RAG prompt with extracted text
 
         prompt = """
 You are a highly specialized assistant dedicated to answering only relevant questions from a book extract. Your responses must strictly adhere to the instructions below.
@@ -341,84 +315,6 @@ def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
 
-def setup_retriever(doc_splits):
-    embedding = OpenAIEmbeddings(model="text-embedding-3-large")
-    vectorstore = Chroma.from_documents(documents=doc_splits, embedding=embedding)
-    return vectorstore.as_retriever()
-
-
-def gen(llm, retriever, input_question):
-
-    print(f"ques is: {input_question}")
-    retriever = Retriever(doc_splits, embeddings)
-
-    generation = conversational_rag_chain.invoke(
-        {"input": input_question},
-        config={"configurable": {"session_id": "abc123"}},
-    )["answer"]
-    return generation
-
-
-def gen_with_history(llm, retriever, input_question):
-
-    print(f"ques is: {input_question}")
-    contextualize_q_system_prompt = (
-        "Given a chat history and the latest user question "
-        "which might reference context in the chat history, "
-        "formulate a standalone question which can be understood "
-        "without the chat history. Do NOT answer the question, "
-        "just reformulate it if needed and otherwise return it as is."
-    )
-    contextualize_q_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", contextualize_q_system_prompt),
-            MessagesPlaceholder("chat_history"),
-            ("human", "{input}"),
-        ]
-    )
-    history_aware_retriever = create_history_aware_retriever(
-        llm, retriever, contextualize_q_prompt
-    )
-
-    system_prompt = (
-        "Help on a clarifying question, which is based on the"
-        "question and the answer that precedes it. "
-        "If you think the question is irrelevant, say that you "
-        "don't know. If it is mathematical, answer in steps."
-    )
-
-    qa_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system_prompt),
-            MessagesPlaceholder("chat_history"),
-            ("human", "{input}"),
-        ]
-    )
-    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
-
-    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-
-    store = {}
-
-    def get_session_history(session_id: str) -> BaseChatMessageHistory:
-        if session_id not in store:
-            store[session_id] = ChatMessageHistory()
-        return store[session_id]
-
-    conversational_rag_chain = RunnableWithMessageHistory(
-        rag_chain,
-        get_session_history,
-        input_messages_key="input",
-        history_messages_key="chat_history",
-        output_messages_key="answer",
-    )
-    generation = conversational_rag_chain.invoke(
-        {"input": input_question},
-        config={"configurable": {"session_id": "abc123"}},
-    )["answer"]
-    return generation
-
-
 def extract_question_and_answer_from_pdf(file_content):
     """
     Extracts the question and correct answer from a PDF file.
@@ -506,16 +402,6 @@ def extract_question_and_answer_conv_from_pdf(file_content):
                 "Could not find 'Question:' or 'Solution:' markers in the PDF."
             )
         return question, correct_answer, prev_step, curr_step
-
-
-def process_document(file_content):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-        tmp_file.write(file_content)
-        tmp_file.flush()
-        docs = [PyPDFLoader(tmp_file.name).load()]
-        docs_list = [item for sublist in docs for item in sublist]
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=0)
-        return text_splitter.split_documents(docs_list)
 
 
 if __name__ == "__main__":
